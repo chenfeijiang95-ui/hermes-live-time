@@ -111,10 +111,9 @@ Resolved fresh on each call, in this order:
 Weekday labels are English abbreviations (`Mon` … `Sun`) on purpose: the injected block
 stays identical no matter what locale the rest of the conversation is in.
 
-> **Profile caveat.** When `HERMES_HOME` is not set, step 2 reads `~/.hermes/config.yaml`
-> — the **default profile's** config. A non-default profile's `timezone` is only picked up
-> when Hermes exports `HERMES_HOME` for that profile, which is what the normal startup
-> path does.
+> **Profile caveat.** When `HERMES_HOME` is unset, step 2 falls back to the default home's
+> configuration file — so a non-default profile's `timezone` key is only picked up when
+> Hermes exports `HERMES_HOME` for that profile, which is what the normal startup path does.
 
 ## Troubleshooting
 
@@ -128,9 +127,10 @@ stays identical no matter what locale the rest of the conversation is in.
 ## Tests
 
 ```bash
-pip install pytest
 pytest tests/test_live_time.py -v
 ```
+
+Requires `pytest` in your environment.
 
 Covers the injected-block shape, the timezone resolution order, and the invalid-timezone
 fallback path.
