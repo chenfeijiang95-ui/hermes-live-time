@@ -93,8 +93,8 @@ the model to treat the session-start stamp as history rather than as the present
 |---|---|
 | **Ephemeral** | Appended to the request only — never written into the cached system prompt, so **prompt caching is unaffected**. |
 | **Read-only** | Touches no transcript, no memory store, no network. Nothing is persisted. |
-| **Zero dependencies** | Standard library + PyYAML (already shipped with Hermes). |
-| **No internal imports** | Nothing from `hermes_cli`/`agent/*`, so upstream refactors can't break it. |
+| **Zero dependencies** | Standard library only. The runtime's YAML shim (`hermes_yaml`, ruamel-based) is used when importable, PyYAML otherwise — both optional. |
+| **One guarded internal import** | `hermes_time._resolve_timezone_name`, wrapped in `try/except ImportError`, so a standalone copy still works. |
 | **Fails open** | Unreadable config, unknown timezone, missing `zoneinfo` data → falls back to system-local time instead of raising. |
 | **Single hook** | `pre_llm_call` and nothing else — one line in `register()`. |
 | **Cheap** | A few string operations per turn. No I/O in the hot path. |
@@ -103,17 +103,24 @@ the model to treat the session-start stamp as history rather than as the present
 
 Resolved fresh on each call, in this order:
 
-1. `HERMES_TIMEZONE` environment variable
-2. top-level `timezone` key in `<HERMES_HOME | ~/.hermes>/config.yaml`
-   (parsed with `yaml.safe_load`, so inline comments and nesting are handled)
-3. local system timezone (rendered as an offset, e.g. `TZ UTC+8`)
+1. `hermes_time._resolve_timezone_name()` — Hermes' own resolver, and the only source that
+   knows the **routed profile** (see the multiplex caveat below). Guarded by
+   `try/except`, so a standalone copy falls through to step 2.
+2. `HERMES_TIMEZONE` environment variable
+3. top-level `timezone` key in `<HERMES_HOME | ~/.hermes>/config.yaml`
+   (parsed with `hermes_yaml.safe_load` inside a Hermes runtime, PyYAML elsewhere)
+4. local system timezone (rendered as an offset, e.g. `TZ UTC+8`)
 
 Weekday labels are English abbreviations (`Mon` … `Sun`) on purpose: the injected block
 stays identical no matter what locale the rest of the conversation is in.
 
-> **Profile caveat.** When `HERMES_HOME` is unset, step 2 falls back to the default home's
-> configuration file — so a non-default profile's `timezone` key is only picked up when
-> Hermes exports `HERMES_HOME` for that profile, which is what the normal startup path does.
+> **Multiplex caveat.** A host gateway serving several profiles does **not** export
+> `HERMES_HOME` per routed profile: inside the gateway process it still points at the
+> host's home (`~/.hermes`) while the session runs `profiles/<name>`. Reading the config
+> file directly therefore resolves the *default* profile's `timezone` — usually unset —
+> and the plugin silently falls back to system-local time. `HERMES_TIMEZONE` cannot cover
+> this either, since one env value can only describe one profile. Step 1 exists for this:
+> `hermes_time` resolves the profile that is actually answering.
 
 ## Troubleshooting
 
@@ -121,7 +128,8 @@ stays identical no matter what locale the rest of the conversation is in.
 |---|---|
 | Agent still quotes a stale date | Plugin isn't loaded — run `hermes plugins list` (look for `live-time`, status *enabled*), then `hermes gateway restart`. |
 | Time is right but the timezone is off | `HERMES_TIMEZONE` unset and `config.yaml` has no `timezone` key → it's using system-local. Set either one. |
-| Timezone ignored for a specific profile | See the profile caveat above: that profile must export `HERMES_HOME`. |
+| Timezone ignored for a specific profile | See the multiplex caveat above: the config file is the host's, not the routed profile's. Step 1 (`hermes_time`) is what fixes this. |
+| Timezone ignored everywhere (`TZ UTC+8` while `config.yaml` sets one) | The runtime has no importable `hermes_time` *and* no YAML module (`hermes_yaml`/PyYAML), so only system-local time is available. |
 | Nothing in the request at all | Another plugin or an older Hermes build. Check `hermes plugins doctor .` in the plugin directory. |
 
 ## Tests
