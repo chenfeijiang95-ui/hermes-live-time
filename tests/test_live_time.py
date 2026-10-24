@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -33,12 +35,22 @@ def test_on_pre_llm_call_returns_live_timestamp_context() -> None:
     assert m, f"missing timestamp in {text!r}"
     parsed = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
 
-    # Compare in UTC using the offset reported in the text, so the assertion
-    # holds regardless of which timezone the plugin resolved to.
-    mo = re.search(r"UTC([+-]\d+)", text)
+    # The block renders either a named zone ("TZ Asia/Jakarta") or a bare offset
+    # ("TZ UTC+8"), so compare against whichever one it reported.
+    mz = re.search(r"TZ ([A-Za-z_]+/[A-Za-z_+\-0-9]+)", text)
+    if mz:
+        from zoneinfo import ZoneInfo
+
+        expected = datetime.now(ZoneInfo(mz.group(1))).replace(tzinfo=None)
+        assert abs((expected - parsed).total_seconds()) < 30
+        return
+
+    mo = re.search(r"UTC([+-])(\d{1,2})(?::(\d{2}))?", text)
     assert mo, f"missing UTC offset in {text!r}"
-    offset_h = int(mo.group(1))
-    parsed_utc = parsed - timedelta(hours=offset_h)
+    offset_minutes = int(mo.group(2)) * 60 + int(mo.group(3) or 0)
+    if mo.group(1) == "-":
+        offset_minutes = -offset_minutes
+    parsed_utc = parsed - timedelta(minutes=offset_minutes)
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     assert abs((now_utc - parsed_utc).total_seconds()) < 30
 
@@ -71,6 +83,8 @@ def test_env_timezone_is_respected(monkeypatch) -> None:
 
 
 def test_config_timezone_is_respected(monkeypatch, tmp_path) -> None:
+    if not _yaml_available():
+        pytest.skip("no YAML library importable in this environment")
     monkeypatch.delenv("HERMES_TIMEZONE", raising=False)
     cfg = tmp_path / "config.yaml"
     cfg.write_text('timezone: "Asia/Tokyo"\n', encoding="utf-8")
@@ -120,3 +134,41 @@ def test_weekday_label_is_locale_neutral() -> None:
     assert m and m.group(1) in {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}, (
         f"weekday label not locale-neutral: {text!r}"
     )
+
+
+def _yaml_available() -> bool:
+    """True when a YAML module the plugin can actually use is importable here."""
+    for module in ("hermes_yaml", "yaml"):
+        try:
+            __import__(module)
+        except ImportError:
+            continue
+        return True
+    return False
+
+
+def test_hermes_resolver_is_preferred(monkeypatch) -> None:
+    """Hermes' own resolver wins over both env and config file.
+
+    It is the only source that knows the *routed* profile: under a multiplexed gateway
+    ``HERMES_HOME`` still points at the host gateway's home, so reading the config file
+    resolves the default profile's ``timezone`` instead of the session's, and one env
+    value can only ever describe one profile.
+    """
+    monkeypatch.setenv("HERMES_TIMEZONE", "America/New_York")
+    fake = types.ModuleType("hermes_time")
+    fake._resolve_timezone_name = lambda: "Asia/Jakarta"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "hermes_time", fake)
+    assert _live_time._resolve_timezone_name() == "Asia/Jakarta"
+
+
+def test_config_file_is_read_via_the_runtime_yaml_shim(monkeypatch, tmp_path) -> None:
+    """Outside a Hermes runtime the config file is the fallback — read with the runtime's
+    YAML module (``hermes_yaml``, ruamel-based); PyYAML is not installed there."""
+    if not _yaml_available():
+        pytest.skip("no YAML library importable in this environment")
+    monkeypatch.delenv("HERMES_TIMEZONE", raising=False)
+    monkeypatch.setitem(sys.modules, "hermes_time", None)  # force the config-file path
+    (tmp_path / "config.yaml").write_text('timezone: "Asia/Tokyo"\n', encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert _live_time._resolve_timezone_name() == "Asia/Tokyo"

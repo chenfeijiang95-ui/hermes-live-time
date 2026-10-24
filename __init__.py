@@ -28,6 +28,17 @@ _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 def _resolve_timezone_name() -> str:
     """Return a configured IANA timezone name, or "" for system-local."""
+    # Hermes' own resolver knows the routed profile under a multiplexed gateway,
+    # where HERMES_HOME still points at the host gateway's home.
+    try:
+        from hermes_time import _resolve_timezone_name as _hermes_resolve
+
+        resolved = _hermes_resolve()
+        if resolved:
+            return resolved
+    except Exception:  # standalone use outside a Hermes runtime
+        pass
+
     tz = os.environ.get("HERMES_TIMEZONE", "").strip()
     if tz:
         return tz
@@ -35,7 +46,11 @@ def _resolve_timezone_name() -> str:
     cfg_path = Path(home) / "config.yaml"
     try:
         if cfg_path.exists():
-            import yaml  # PyYAML ships with the Hermes runtime
+            try:
+                # The Hermes runtime ships ruamel (hermes_yaml), NOT PyYAML.
+                import hermes_yaml as yaml
+            except ImportError:  # standalone use outside a Hermes runtime
+                import yaml  # PyYAML
 
             loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
             if isinstance(loaded, dict):
