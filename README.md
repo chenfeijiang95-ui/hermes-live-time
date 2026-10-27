@@ -5,14 +5,14 @@
 <p align="center">
   <a href="https://github.com/NousResearch/hermes-agent/blob/main/plugin-catalog/live-time.yaml"><img alt="In the official Hermes plugin catalog" src="https://img.shields.io/badge/Hermes%20catalog-live--time-d9b26a?style=flat-square" /></a>
   <img alt="Hook: pre_llm_call" src="https://img.shields.io/badge/hook-pre__llm__call-0891b2?style=flat-square" />
-  <img alt="Version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-7c3aed?style=flat-square" />
+  <img alt="Version 1.0.1" src="https://img.shields.io/badge/version-1.0.1-7c3aed?style=flat-square" />
   <img alt="Dependencies: none" src="https://img.shields.io/badge/dependencies-none-64748b?style=flat-square" />
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-10b981?style=flat-square" />
   <img alt="GitHub stars" src="https://img.shields.io/github/stars/chenfeijiang95-ui/hermes-live-time?style=flat-square&color=d9b26a" />
 </p>
 
 <p align="center">
-  <b>The agent always knows what time it is. Every turn. No tool call, no guessing.</b>
+  <b>The agent always knows what time it is — and what day it is. Every turn. No tool call, no guessing.</b>
 </p>
 
 ---
@@ -27,6 +27,18 @@ and can't tell a five-minute reply from a two-day gap.
 live-time re-injects the **real, current, timezone-aware time on every LLM call**, so
 that whole class of confusion disappears. Tracking issue:
 [#10421](https://github.com/NousResearch/hermes-agent/issues/10421).
+
+**Common symptoms** — if any of these sound familiar, this is the fix:
+
+- the agent states the **wrong date**, or insists it is still yesterday / last week
+- it **"corrects" you** about what day it is — while you are the one who is right
+- **date drift** in long sessions: the anchor only refreshes when the session is rebuilt
+- **wrong timezone**: times come back as a raw UTC offset instead of your local zone
+- the clock is off for scheduled work — reminders, cron reports, "has Monday arrived yet?"
+- worst case, a **wrong external write**: a calendar entry or reminder placed on the wrong day
+
+Sessions that never restart drift the hardest — **WeChat / QQ / Telegram / Feishu / Discord
+gateways**, long-running companions, 24/7 assistants.
 
 **Before → after**, in an ordinary cross-day session:
 
